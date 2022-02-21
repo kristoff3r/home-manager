@@ -157,6 +157,13 @@ in {
           or by Visual Studio Code.
         '';
       };
+
+      mutableUserSettings = mkEnableOption ''
+          Change user settings in Visual Studio Code (rather than through Home Manager).
+          During activation <xref linkend="opt-programs.vscode.userSettings"/>
+          are merged with the existing settings (which take priority if
+          both are present).
+        '';
     };
   };
 
@@ -164,7 +171,7 @@ in {
     home.packages = [ cfg.package ];
 
     home.file = mkMerge [
-      (mkIf (cfg.userSettings != { }) {
+      (mkIf (!cfg.mutableUserSettings && cfg.userSettings != { }) {
         "${configFilePath}".source =
           jsonFormat.generate "vscode-user-settings" cfg.userSettings;
       })
@@ -200,5 +207,20 @@ in {
         in "${combinedExtensionsDrv}/${subDir}";
       }))
     ];
+
+    home.activation =
+      mkIf (cfg.mutableUserSettings && cfg.userSettings != { }) {
+        injectVscodeSettings = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+          tmp="$(mktemp)"
+
+          # Replaces the current config with the merger of it and the given
+          # userSettings. The existing settings take priority.
+          $DRY_RUN_CMD ${pkgs.jq}/bin/jq -s 'reduce .[] as $x ({}; . * $x)' "${
+            jsonFormat.generate "vscode-user-settings" cfg.userSettings
+          }" "${configFilePath}" > "$tmp"
+
+          $DRY_RUN_CMD mv "$tmp" "${configFilePath}"
+        '';
+      };
   };
 }
